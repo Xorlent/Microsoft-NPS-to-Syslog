@@ -17,10 +17,11 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
     - Open mmc.exe and load the Local Group Policy Snap-In.  
       - Add the user you created to the, “Log on as a batch job” right.  
       - This can be found in Computer Configuration->Windows Settings->Local Policies->User Rights Assignments  
-    - Configure a trigger of, "At startup."  
-    - Configure a command of, "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"  
-    - Set the execution argument to, "-File C:\Path\To\Install\ParseNPSLogs.ps1"
-    - Configure the task to run as the local user you created  
+    - In Task Scheduler
+      - Configure a trigger of, "At startup."  
+      - Configure a command of, "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"  
+      - Set the execution argument to, "-File C:\Path\To\Install\ParseNPSLogs.ps1"
+      - Configure the task to run as the local user you created  
 
 ### Execution
 - On first run, you will likely want to backfill data from logs currently in place on the NPS server.  
