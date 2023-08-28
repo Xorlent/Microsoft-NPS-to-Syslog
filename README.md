@@ -11,7 +11,11 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
 1. Download the latest release .ZIP file  
 2. Right-click the downloaded file, click Properties, and click "Unblock"  
 3. Extract the .ZIP to a single directory  
-4. Edit NPS-Syslog-Config.xml to match your environment settings  
+4. Edit NPS-Syslog-Config.xml to match your environment settings
+5. Once you are familiar with the operation and have successfully backfilled your logs, you can create a scheduled task
+    - Configure a trigger of, "At startup."
+    - Configure a command of, "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    - Set the execution argument to, "-File C:\Path\To\Install\ParseNPSLogs.ps1
 
 ### Execution
 - On first run, you will likely want to backfill data from logs currently in place on the NPS server.  
