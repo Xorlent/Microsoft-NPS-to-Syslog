@@ -2,23 +2,23 @@
 ## NOTE: Work in progress
 Syslog connector/parser for Microsoft NPS server logs  
 This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS servers and is designed to run as an unprivileged local user with only read/list access needed to the NPS log folder.  
-  
-## Installation  
-1. Download
-2. Run installer
-3. Configure Syslog details  
 
 ## Prerequisites
-1. A Windows NPS server with PowerShell enabled
-2. A Syslog UDP collector to receive events
+1. A Windows NPS server with PowerShell enabled  
+2. A Syslog UDP collector to receive events  
 
 ## Installation
-1. Download the latest release .ZIP file.
-2. Right-click the downloaded file, click Properties, and click "Unblock"
-3. Extract the .ZIP to a single directory.
-4. Launch PowerShell as an administrator, navigate to the directory with the unzipped files.
-5. Type .\NPS-Syslog-Install.ps1 to run the installer.
-6. Follow the directions at the end of the process to complete SimpleFIM setup.
+1. Download the latest release .ZIP file  
+2. Right-click the downloaded file, click Properties, and click "Unblock"  
+3. Extract the .ZIP to a single directory  
+4. Edit NPS-Syslog-Config.xml to match your environment settings  
+
+### Execution
+- On first run, you will likely want to backfill data from logs currently in place on the NPS server.  
+  - To do this, execute: ```ParseNPSLogs.ps1 $true```  
+  - Expect execution to take about 1 second for every 10MB of logfile.  If you cancel before the process has completed, it will not save the backfill state.  
+- On subsequent runs, simply execute ParseNPSLogs.ps1  
+- If the parser has not run for some period of time, you can catch up by again running the backfill command.  
 
 ## Operation
 ### Configuration
@@ -43,12 +43,3 @@ This setting is handled by the installer.  Open mmc.exe and load the Local Group
 ### The script was not running for a few days so I have a gap in logs sent to Syslog
 1. Edit backfilled.txt and set the date (in YYMMDD format) to the file prior to where you would like to resume the backfill process.  
 2. Run ```NPS-Syslog.ps1 $true```
-
-
-### Installation
-- Save the script and configuration file to the NPS server
-### Execution
-- On first run, you may want to backfill data from logs currently in place on the NPS server.
-  - To do this, execute: ```NPS-Syslog.ps1 $true```  
-- On subsequent runs, simply execute NPS-Syslog.ps1  
-- If the parser has not run for some period of time, you can catch up by again running the backfill command.  
