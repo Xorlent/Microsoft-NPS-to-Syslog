@@ -13,7 +13,7 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
 3. Extract the .ZIP to a single directory  
 4. Edit NPS-Syslog-Config.xml to match your environment settings  
 5. Once you are familiar with the operation and have successfully backfilled your logs, you can create a scheduled task  
-    - Open Computer Management and create a local user account with a strong password and no group memberships beyond, "Users"  
+    - Open Computer Management and create a local user account with a strong password and no group membership beyond, "Users"  
     - Open mmc.exe and load the Local Group Policy Snap-In.  
       - Add the user you created to the, “Log on as a batch job” right.  
       - This can be found in Computer Configuration->Windows Settings->Local Policies->User Rights Assignments  
