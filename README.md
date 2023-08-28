@@ -34,7 +34,6 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
 #### NPS-Syslog-Config.xml
 - Edit this file to specify your Syslog UDP server details.  
 - If you have a RADIUS test user, specify that username in the "ignoreuser" field.  
-### Two files control the execution of the NPS-to-Syslog script
 #### NPS-Syslog.ps1
 This is the main program script.  The tool can process about 10MB of log data per second, so plan accordingly if you will be backfilling a large amount of data.  
 #### radius_functions.ps1
