@@ -23,15 +23,14 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
       - Set the execution argument to, "-File C:\Path\To\Install\ParseNPSLogs.ps1"
       - Configure the task to run as the local user you created  
 
-### Execution
+## Execution
 - On first run, you will likely want to backfill data from logs currently in place on the NPS server.  
   - To do this, execute: ```ParseNPSLogs.ps1 $true```  
   - Expect execution to take about 1 second for every 10MB of logfile.  If you cancel before the process has completed, it will not save the backfill state.  
 - On subsequent runs, simply execute ParseNPSLogs.ps1  
 - If the parser has not run for some period of time, you can catch up by again running the backfill command.  
 
-## Operation
-### Configuration
+### Files
 #### NPS-Syslog-Config.xml
 - Edit this file to specify your Syslog UDP server details.  
 - If you have a RADIUS test user, specify that username in the "ignoreuser" field.  
@@ -40,10 +39,7 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
 This is the main program script.  The tool can process about 10MB of log data per second, so plan accordingly if you will be backfilling a large amount of data.  
 #### radius_functions.ps1
 This file contains lookup functions for various log status fields, converting from numbers to human-readable text  
-### User Account
-A local user named, “npslog” is created by the installer with a unique, strong password.  The user account is configured with no password expiration and is not added to any privileged security groups.  
-### Group Policy Settings
-This setting is handled by the installer.  Open mmc.exe and load the Local Group Policy.  The new “npslog” user is added to the, “Log on as a batch job” right.  This can be found in Computer Configuration->Windows Settings->Local Policies->User Rights Assignments  
+
 ## Troubleshooting
 ### I need to edit the scheduled task but do not know the password for the "npslog" user account
 1. Open Computer Management and reset the password for the npslog user.  Always use a complex password with a minimum length of 15 characters.
