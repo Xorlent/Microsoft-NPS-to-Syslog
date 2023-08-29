@@ -347,13 +347,13 @@ function SendTo-SysLog
     $UdpClient.Send($bytearray, $bytearray.length) | out-null
 } # End SendTo-SysLog
 
-# this function cleans and escapes necessary characters for InfluxDB to consume
+# This function is likely unnecessary for Syslog.  Keeping just in case we need to do some string sanitizing.
 function sanitizeStringForInflux($string)
 {
     $StringRet = $string.trim()
-    if($StringRet.Contains(',')){$stringRet = $stringRet.replace(',','\,')}
-    if($StringRet.Contains(' ')){$stringRet = $stringRet.replace(' ','\ ')}
-    if($StringRet.Contains('=')){$stringRet = $stringRet.replace('=','\=')}
+    #if($StringRet.Contains(',')){$stringRet = $stringRet.replace(',','\,')}
+    #if($StringRet.Contains(' ')){$stringRet = $stringRet.replace(' ','\ ')}
+    #if($StringRet.Contains('=')){$stringRet = $stringRet.replace('=','\=')}
     return $stringRet
 }
 
