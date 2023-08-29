@@ -1,6 +1,7 @@
-# Many thanks to https://github.com/geek-at for the basis used to develop this project!
+# Many thanks to https://github.com/geek-at for the basis used to develop the NPS log parser.
 
 <#
+
 BACKFILL: If $true, Load any files found within the specified NPS log path.
      If backfill has previously run (as indicated by the presence of a .\backfilled.txt file,
      backfill beginning on the day following the previous run.
@@ -8,23 +9,35 @@ BACKFILL: If $false, just open today's file, fill according to the .\lasttime.tx
 #>
 param([bool]$BACKFILLFLAG = $false)
 
-. .\radius_functions.ps1 # load the field translation functions
-
+Try {. .\radius_functions.ps1} # load the field translation functions
+Catch {
+    Write-Console 'Failed to load required translation functions from radius_functions.ps1'
+    Write-Console 'It is possible you need to change your PowerShell execution policy.  See https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy?view=powershell-7.3'
+    Write-Console 'Example execution policy command:'
+    Write-Console 'Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser'
+    exit 3
+    }
+    
 $ConfigFile = '.\NPS-Syslog-Config.xml'
 $ConfigParams = [xml](get-content $ConfigFile) # load the configuraton file
 
 # load the configuration values into script variables
 $PATH = $ConfigParams.configuration.log.path.value
-$DBSERVER = $ConfigParams.configuration.server.fqdn.value
-$DBNAME = $ConfigParams.configuration.server.dbname.value
-$DBPORT = $ConfigParams.configuration.server.dbport.value
+$SyslogTarget = $ConfigParams.configuration.server.fqdn.value
+$SyslogPort = $ConfigParams.configuration.server.port.value
 $IGNOREUSER = $ConfigParams.configuration.option.ignoreuser.value
 
 # This computer's NETBIOS name, used for Syslog
 $NPSHostname = $env:COMPUTERNAME
 
 # initialize the UDP socket writer
-$UDPCLIENT = New-Object System.Net.Sockets.UdpClient $DBSERVER, $DBPORT
+if ($SyslogTarget -ne "syslog.hostname.here") {
+    $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
+ }
+ else{
+    Write-Output "ERROR: Cannot resolve syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
+    exit 1
+ }
 
 # flag used to track whether we're in follow mode or fill/backfill mode
 $FOLLOWINGLOG = $false
@@ -153,10 +166,6 @@ function parseLog($f)
     $rs = TranslateReason($reason)
     $authmethod = $g[30]
 
-    # $ap_host = $g[11].Replace('"', '')
-    # $ap_radname = $g[16].Substring(0, 5).ToLower().Replace('"', '')
-    # $speed = $g[20].Replace('"', '')
-
     $tt = TranslatePackageType($type)
     $tq = [Math]::Round($timestamp / 900) * 900
 
@@ -189,96 +198,154 @@ function parseLog($f)
 
     switch($type) # check to see what type of log this is so we know what fields are important to send to the database
     {
-        1 { #Requesting access
+        1 { #Requesting access - auth, informational
                     
             # Making sure all tag values are set and if not, set them to "0"
             $policy2 = if ($policy2) { SanitizeStringForInflux($policy2) } else { 'nomatch' }
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-
-            sendToDB "$DBNAME,type=auth-request,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
+            $details = $logDTS.ToString("u") + " | AUTH-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+            #sendToDB "$DBNAME,type=auth-request,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             }
 
-        2 { #Accepted
+        2 { #Accepted - auth, notice
 
             # Making sure all tag values are set and if not, set them to "0"
             $authmethod =  if ($authmethod) { SanitizeStringForInflux($authmethod) } else { 'other' }
             $OU = if ($OU) { $OU } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-
-            sendToDB "$DBNAME,type=auth-accept,device=$ap_radname_full,deviceip=$ap_ip,authmethod=$authmethod,special=$OU,special_type=OU value=`"$origin_client`"" $influxtime
+            $details = $logDTS.ToString("u") + " | AUTH-ACCEPT | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | AuthMethod: " + $authmethod + " | Client: " + $origin_client + " | OU: " + $OU
+            SendTo-Syslog "auth" "notice" $details "NPS-RADIUS"
+            #sendToDB "$DBNAME,type=auth-accept,device=$ap_radname_full,deviceip=$ap_ip,authmethod=$authmethod,special=$OU,special_type=OU value=`"$origin_client`"" $influxtime
             }
 
-        3 { #Rejected
+        3 { #Rejected - auth, error
 
             #making sure all tag values are set and if not, set them to "0"
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $reason = if ($reason) { $reason } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             $rs = if ($rs) { $rs } else { '0' }
-
-            sendToDB "$DBNAME,type=auth-rejected,device=$ap_radname_full,deviceip=$ap_ip,special=$reason,special_type=reason value=`"$origin_client`",special_val=`"$rs`"" $influxtime
+            $details = $logDTS.ToString("u") + " | AUTH-REJECTED | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Reason: " + $reason + " | Client: " + $origin_client + " | Extended: " + $rs
+            SendTo-Syslog "auth" "error" $details "NPS-RADIUS"
+            #sendToDB "$DBNAME,type=auth-rejected,device=$ap_radname_full,deviceip=$ap_ip,special=$reason,special_type=reason value=`"$origin_client`",special_val=`"$rs`"" $influxtime
             }
 
         4 { #Accounting-Request - In sample logs we observed a large number of events of no value, so we filter out anything lacking details about a client (name, or user, or MAC)
-
+                # auth, informational
             #making sure all tag values are set and if not, set them to "0"
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             if ($client_mac) {
-                sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
+                $details = $logDTS.ToString("u") + " | ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+                SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+                #sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             } 
             else {
                 if ($client) {
-                sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client,special_type=user value=`"$client`"" $influxtime
+                $details = $logDTS.ToString("u") + " | ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $client
+                SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+                #sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client,special_type=user value=`"$client`"" $influxtime
                 }
             }
             }
 
-        5 { #Accounting-Response
+        5 { #Accounting-Response - auth, informational
 
             #making sure all tag values are set and if not, set them to "0"
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-
-            sendToDB "$DBNAME,type=accounting-response,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
+            $details = $logDTS.ToString("u") + " | ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+            #sendToDB "$DBNAME,type=accounting-response,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             }
 
-        11 { #Access-Challenge
+        11 { #Access-Challenge - auth, informational
 
             #making sure all tag values are set and if not, set them to "0"
             $policy2 = if ($policy2) { SanitizeStringForInflux($policy2) } else { 'nomatch' }
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-
-            sendToDB "$DBNAME,type=auth-challenge,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
+            $details = $logDTS.ToString("u") + " | AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+            #sendToDB "$DBNAME,type=auth-challenge,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             }
         #default {}
     }
     saveLastTime($timestamp)
 }
 
-# this function takes a string of data (from parseLog($f)) and pushes the payload to the configured InfluxDB instance/database
-function sendToDB($data,$time)
+# The SendTo-Syslog function is adapted from https://www.sans.org/blog/powershell-function-to-send-udp-syslog-message-packets/ with many thanks!
+function SendTo-SysLog
 {
-    $data = $data + ' ' + $time
-    $bytearray = $([System.Text.Encoding]::ASCII).getbytes($data)
-    if ($bytearray.count -lt 996) {
-    	$UDPCLIENT.Send($bytearray, $bytearray.length) | out-null
-    	Write-Host " ____________________________________________________________ "
-    	Write-Host $data
-    	Write-Host " ------------------------------------------------------------ "
-    }
-    else{
-    	Write-Host " _DATA NOT SENT__DATA NOT SENT__DATA NOT SENT__DATA NOT SENT_ "
-    	Write-Host $data
-    	Write-Host " -------------LENGTH EXCEEDS UDP PACKET LIMIT---------------- "
-     }
-}
+    param ([String]$Facility, [String]$Severity, [String]$Content, [String]$Tag)
+ 
+    switch -regex ($Facility)
+        {
+        'kern' {$Facility = 0 * 8 ; break }
+        'user' {$Facility = 1 * 8 ; break }
+        'mail' {$Facility = 2 * 8 ; break }
+        'system' {$Facility = 3 * 8 ; break }
+        'auth' {$Facility = 4 * 8 ; break }
+        'syslog' {$Facility = 5 * 8 ; break }
+        'lpr' {$Facility = 6 * 8 ; break }
+        'news' {$Facility = 7 * 8 ; break }
+        'uucp' {$Facility = 8 * 8 ; break }
+        'cron' {$Facility = 9 * 8 ; break }
+        'authpriv' {$Facility = 10 * 8 ; break }
+        'ftp' {$Facility = 11 * 8 ; break }
+        'ntp' {$Facility = 12 * 8 ; break }
+        'logaudit' {$Facility = 13 * 8 ; break }
+        'logalert' {$Facility = 14 * 8 ; break }
+        'clock' {$Facility = 15 * 8 ; break }
+        'local0' {$Facility = 16 * 8 ; break }
+        'local1' {$Facility = 17 * 8 ; break }
+        'local2' {$Facility = 18 * 8 ; break }
+        'local3' {$Facility = 19 * 8 ; break }
+        'local4' {$Facility = 20 * 8 ; break }
+        'local5' {$Facility = 21 * 8 ; break }
+        'local6' {$Facility = 22 * 8 ; break }
+        'local7' {$Facility = 23 * 8 ; break }
+        default {$Facility = 23 * 8 } #Default is local7
+        }
+    
+    switch -regex ($Severity)
+        {
+        '^em' {$Severity = 0 ; break } #Emergency
+        '^a' {$Severity = 1 ; break } #Alert
+        '^c' {$Severity = 2 ; break } #Critical
+        '^er' {$Severity = 3 ; break } #Error
+        '^w' {$Severity = 4 ; break } #Warning
+        '^n' {$Severity = 5 ; break } #Notice
+        '^i' {$Severity = 6 ; break } #Informational
+        '^d' {$Severity = 7 ; break } #Debug
+        default {$Severity = 5 } #Default is Notice
+        }
+    $privalue = [int]$Facility + [int]$Severity
+    $pri = "<" + $privalue + ">"
+    
+    # Note that the timestamp is local time on the originating computer, not UTC.
+    if ($(get-date).day -lt 10) { $timestamp = $(get-date).tostring("MMM d HH:mm:ss") } else { $timestamp = $(get-date).tostring("MMM dd HH:mm:ss") }
+    
+    $header = $timestamp + " " + $NPSHostname + " "
+    
+    $msg = $pri + $header + $Tag + ": " + $Content
+    
+    # Convert message to array of ASCII bytes.
+    $bytearray = $([System.Text.Encoding]::ASCII).getbytes($msg)
+    
+    # RFC3164 Section 4.1: "The total length of the packet MUST be 1024 bytes or less."
+    # "Packet" is not "PRI + HEADER + MSG", and IP header = 20, UDP header = 8, hence:
+    if ($bytearray.count -gt 996) { $bytearray = $bytearray[0..995] }
+    
+    # Send the Syslog message...
+    $UdpClient.Send($bytearray, $bytearray.length) | out-null
+} # End SendTo-SysLog
 
 # this function cleans and escapes necessary characters for InfluxDB to consume
 function sanitizeStringForInflux($string)
