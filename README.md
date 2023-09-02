@@ -20,14 +20,14 @@ This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS ser
     - In Task Scheduler
       - Configure a trigger of, "At startup."  
       - Configure a command of, "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"  
-      - Set the execution argument to, "-File C:\Path\To\Install\ParseNPSLogs.ps1"
+      - Set the execution argument to, "-File C:\Path\To\Install\NPS-Syslog.ps1"
       - Configure the task to run as the local user you created  
 
 ## Execution
 - On first run, you will likely want to backfill data from logs currently in place on the NPS server.  
-  - To do this, execute: ```ParseNPSLogs.ps1 $true```  
+  - To do this, execute: ```NPS-Syslog.ps1 $true```  
   - Expect execution to take about 1 second for every 10MB of logfile.  If you cancel before the process has completed, it will not save the backfill state.  
-- On subsequent runs, simply execute ParseNPSLogs.ps1  
+- On subsequent runs, simply execute NPS-Syslog.ps1  
 - If the parser has not run for some period of time, you can catch up by again running the backfill command.  
 
 ### Files
