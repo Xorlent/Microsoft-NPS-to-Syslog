@@ -130,6 +130,7 @@ function parseLog($f)
     if ($timestamp -le $lasttime){return} # if we've already processed a log with this date/time, return.
 
     $logDTS = Get-Date ($date + " " + $time) -Format 'MM/dd/yyyy HH:mm:ss'
+    if ($LogDTS.day -lt 10) { $syslogDTS = $LogDTS.tostring("MMM  d HH:mm:ss") } else { $syslogDTS = $LogDTS.tostring("MMM dd HH:mm:ss") }
     $server = $g[0].Replace('"', '')
     $origin = $g[6].Replace('"', '')
     $uname = $g[7].Replace('"', '')
@@ -188,9 +189,6 @@ function parseLog($f)
         $origin_client = $origin
     }
 
-    $influxtime = ([DateTimeOffset]$logDTS).ToUnixTimeSeconds() # Convert to Unix timestamp
-    $influxtime = [string]$influxtime + "000000000" # Add requisite nanoseconds
-
     if($OU) {$OU = SanitizeStringForInflux($OU)}
     else {$OU = ''}
 
@@ -199,15 +197,14 @@ function parseLog($f)
     switch($type) # check to see what type of log this is so we know what fields are important to send to the database
     {
         1 { #Requesting access - auth, informational
-                    
+
             # Making sure all tag values are set and if not, set them to "0"
             $policy2 = if ($policy2) { SanitizeStringForInflux($policy2) } else { 'nomatch' }
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $logDTS.ToString("u") + " | AUTH-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
-            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
-            #sendToDB "$DBNAME,type=auth-request,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
+            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            SendTo-Syslog "auth" "informational" $details
             }
 
         2 { #Accepted - auth, notice
@@ -217,9 +214,8 @@ function parseLog($f)
             $OU = if ($OU) { $OU } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $logDTS.ToString("u") + " | AUTH-ACCEPT | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | AuthMethod: " + $authmethod + " | Client: " + $origin_client + " | OU: " + $OU
-            SendTo-Syslog "auth" "notice" $details "NPS-RADIUS"
-            #sendToDB "$DBNAME,type=auth-accept,device=$ap_radname_full,deviceip=$ap_ip,authmethod=$authmethod,special=$OU,special_type=OU value=`"$origin_client`"" $influxtime
+            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-ACCEPT | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | AuthMethod: " + $authmethod + " | Client: " + $origin_client + " | OU: " + $OU
+            SendTo-Syslog "auth" "notice" $details
             }
 
         3 { #Rejected - auth, error
@@ -229,10 +225,9 @@ function parseLog($f)
             $reason = if ($reason) { $reason } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             $rs = if ($rs) { $rs } else { '0' }
-            $details = $logDTS.ToString("u") + " | AUTH-REJECTED | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Reason: " + $reason + " | Client: " + $origin_client + " | Extended: " + $rs
-            SendTo-Syslog "auth" "error" $details "NPS-RADIUS"
-            #sendToDB "$DBNAME,type=auth-rejected,device=$ap_radname_full,deviceip=$ap_ip,special=$reason,special_type=reason value=`"$origin_client`",special_val=`"$rs`"" $influxtime
-            }
+            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-REJECTED | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Reason: " + $reason + " | Client: " + $origin_client + " | Extended: " + $rs
+            SendTo-Syslog "auth" "error" $details
+          }
 
         4 { #Accounting-Request - In sample logs we observed a large number of events of no value, so we filter out anything lacking details about a client (name, or user, or MAC)
                 # auth, informational
@@ -240,18 +235,17 @@ function parseLog($f)
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             if ($client_mac) {
-                $details = $logDTS.ToString("u") + " | ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
-                SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+                $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+                SendTo-Syslog "auth" "informational" $details
                 #sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             } 
             else {
                 if ($client) {
-                $details = $logDTS.ToString("u") + " | ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $client
-                SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
-                #sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client,special_type=user value=`"$client`"" $influxtime
+                $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $client
+                SendTo-Syslog "auth" "informational" $details
                 }
             }
-            }
+          }
 
         5 { #Accounting-Response - auth, informational
 
@@ -259,9 +253,8 @@ function parseLog($f)
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $logDTS.ToString("u") + " | ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
             SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
-            #sendToDB "$DBNAME,type=accounting-response,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             }
 
         11 { #Access-Challenge - auth, informational
@@ -271,9 +264,8 @@ function parseLog($f)
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $logDTS.ToString("u") + " | AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
             SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
-            #sendToDB "$DBNAME,type=auth-challenge,device=$ap_radname_full,deviceip=$ap_ip,netpolicy=$policy2,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             }
         #default {}
     }
@@ -283,7 +275,7 @@ function parseLog($f)
 # The SendTo-Syslog function is adapted from https://www.sans.org/blog/powershell-function-to-send-udp-syslog-message-packets/ with many thanks!
 function SendTo-SysLog
 {
-    param ([String]$Facility, [String]$Severity, [String]$Content, [String]$Tag)
+    param ([String]$Facility, [String]$Severity, [String]$Content)
  
     switch -regex ($Facility)
         {
@@ -330,11 +322,11 @@ function SendTo-SysLog
     $pri = "<" + $privalue + ">"
     
     # Note that the timestamp is local time on the originating computer, not UTC.
-    if ($(get-date).day -lt 10) { $timestamp = $(get-date).tostring("MMM d HH:mm:ss") } else { $timestamp = $(get-date).tostring("MMM dd HH:mm:ss") }
+    #if ($(get-date).day -lt 10) { $timestamp = $(get-date).tostring("MMM  d HH:mm:ss") } else { $timestamp = $(get-date).tostring("MMM dd HH:mm:ss") }
     
-    $header = $timestamp + " " + $NPSHostname + " "
+    #$header = $timestamp + " " + $NPSHostname + " "
     
-    $msg = $pri + $header + $Tag + ": " + $Content
+    $msg = $pri + $Content
     
     # Convert message to array of ASCII bytes.
     $bytearray = $([System.Text.Encoding]::ASCII).getbytes($msg)
