@@ -30,12 +30,8 @@ $IGNOREUSER = $ConfigParams.configuration.option.ignoreuser.value
 # This computer's NETBIOS name, used for Syslog
 $NPSHostname = $env:COMPUTERNAME
 
-# initialize the UDP socket writer
-if ($SyslogTarget -ne "syslog.hostname.here") {
-    $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
- }
- else{
-    Write-Output "ERROR: Cannot resolve syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
+if ($SyslogTarget -eq "syslog.hostname.here") {
+    Write-Output "ERROR: Invalid syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
     exit 1
  }
 
@@ -329,6 +325,7 @@ function SendTo-SysLog
     if ($bytearray.count -gt 996) { $bytearray = $bytearray[0..995] }
     
     # Send the Syslog message...
+    $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
     $UdpClient.Send($bytearray, $bytearray.length) | out-null
 } # End SendTo-SysLog
 
