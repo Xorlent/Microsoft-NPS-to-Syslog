@@ -1,5 +1,5 @@
 # Microsoft NPS Syslog Connector
-## NOTE: Work in progress
+## NOTE: Limited testing conducted to-date
 Syslog connector/parser for Microsoft NPS server logs  
 This tool has been tested on Server 2016 and Server 2022-based Microsoft NPS servers and is designed to run as an unprivileged local user with only read/list access needed to the NPS log folder.  
 
