@@ -109,7 +109,7 @@ function parseLog($f)
     if(!$f){ # if our input was received from the pipeline, assign the value to $f
     	$f = $_
     }
-    if($f.Length -lt 1){return} # this is an empty line.  Return.
+    if($f.Length -lt 2){return} # this is an empty line.  Return.
     if($f.Contains($IGNOREUSER)){return} # this line contains our ignoreuser string.  Return.
     $f = $f.Trim()
     $g = $f.Split(',')
@@ -128,9 +128,8 @@ function parseLog($f)
       	}
     }
     if ($timestamp -le $lasttime){return} # if we've already processed a log with this date/time, return.
-
-    $logDTS = Get-Date ($date + " " + $time) -Format 'MM/dd/yyyy HH:mm:ss'
-    if ($LogDTS.day -lt 10) { $syslogDTS = $LogDTS.tostring("MMM  d HH:mm:ss") } else { $syslogDTS = $LogDTS.tostring("MMM dd HH:mm:ss") }
+    $logDTS = [DateTime]::ParseExact(($date + " " + $time), "MM/dd/yyyy H:m:s", $null) # Get-Date ($date + " " + $time) -Format 'MM/dd/yyyy HH:mm:ss'
+    if ($LogDTS.day -lt 10) { $syslogDTS = $LogDTS.tostring("MMM  d yyyy HH:mm:ss") } else { $syslogDTS = $LogDTS.tostring("MMM dd yyyy HH:mm:ss") }
     $server = $g[0].Replace('"', '')
     $origin = $g[6].Replace('"', '')
     $uname = $g[7].Replace('"', '')
@@ -189,17 +188,17 @@ function parseLog($f)
         $origin_client = $origin
     }
 
-    if($OU) {$OU = SanitizeStringForInflux($OU)}
+    if($OU) {$OU = sanitizeString($OU)}
     else {$OU = ''}
 
-    $origin_client = SanitizeStringForInflux($origin_client)
+    $origin_client = sanitizeString($origin_client)
 
     switch($type) # check to see what type of log this is so we know what fields are important to send to the database
     {
         1 { #Requesting access - auth, informational
 
             # Making sure all tag values are set and if not, set them to "0"
-            $policy2 = if ($policy2) { SanitizeStringForInflux($policy2) } else { 'nomatch' }
+            $policy2 = if ($policy2) { sanitizeString($policy2) } else { 'nomatch' }
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
@@ -210,7 +209,7 @@ function parseLog($f)
         2 { #Accepted - auth, notice
 
             # Making sure all tag values are set and if not, set them to "0"
-            $authmethod =  if ($authmethod) { SanitizeStringForInflux($authmethod) } else { 'other' }
+            $authmethod =  if ($authmethod) { sanitizeString($authmethod) } else { 'other' }
             $OU = if ($OU) { $OU } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
@@ -237,7 +236,6 @@ function parseLog($f)
             if ($client_mac) {
                 $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
                 SendTo-Syslog "auth" "informational" $details
-                #sendToDB "$DBNAME,type=accounting-request,device=$ap_radname_full,deviceip=$ap_ip,special=$client_mac,special_type=mac value=`"$origin_client`",special=`"$client_mac`"" $influxtime
             } 
             else {
                 if ($client) {
@@ -254,18 +252,18 @@ function parseLog($f)
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
-            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+            SendTo-Syslog "auth" "informational" $details
             }
 
         11 { #Access-Challenge - auth, informational
 
             #making sure all tag values are set and if not, set them to "0"
-            $policy2 = if ($policy2) { SanitizeStringForInflux($policy2) } else { 'nomatch' }
+            $policy2 = if ($policy2) { sanitizeString($policy2) } else { 'nomatch' }
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
-            SendTo-Syslog "auth" "informational" $details "NPS-RADIUS"
+            SendTo-Syslog "auth" "informational" $details
             }
         #default {}
     }
@@ -319,12 +317,7 @@ function SendTo-SysLog
         default {$Severity = 5 } #Default is Notice
         }
     $privalue = [int]$Facility + [int]$Severity
-    $pri = "<" + $privalue + ">"
-    
-    # Note that the timestamp is local time on the originating computer, not UTC.
-    #if ($(get-date).day -lt 10) { $timestamp = $(get-date).tostring("MMM  d HH:mm:ss") } else { $timestamp = $(get-date).tostring("MMM dd HH:mm:ss") }
-    
-    #$header = $timestamp + " " + $NPSHostname + " "
+    $pri = "<" + $privalue + "> "
     
     $msg = $pri + $Content
     
@@ -340,7 +333,7 @@ function SendTo-SysLog
 } # End SendTo-SysLog
 
 # This function is likely unnecessary for Syslog.  Keeping just in case we need to do some string sanitizing.
-function sanitizeStringForInflux($string)
+function sanitizeString($string)
 {
     $StringRet = $string.trim()
     #if($StringRet.Contains(',')){$stringRet = $stringRet.replace(',','\,')}
