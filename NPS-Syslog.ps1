@@ -1,6 +1,7 @@
 # Many thanks to https://github.com/geek-at for the basis used to develop the NPS log parser.
 
 <#
+
 BACKFILL: If $true, Load any files found within the specified NPS log path.
      If backfill has previously run (as indicated by the presence of a .\backfilled.txt file,
      backfill beginning on the day following the previous run.
@@ -26,20 +27,20 @@ $SyslogTarget = $ConfigParams.configuration.server.fqdn.value
 $SyslogPort = $ConfigParams.configuration.server.port.value
 $IGNOREUSER = $ConfigParams.configuration.option.ignoreuser.value
 
-# This computer's NETBIOS name, used to tag Syslog messages
+# This computer's NETBIOS name, used for Syslog
 $NPSHostname = $env:COMPUTERNAME
+
+# flag used to track whether we're in follow mode or fill/backfill mode
+$FOLLOWINGLOG = $false
 
 # initialize the UDP socket writer
 if ($SyslogTarget -ne "syslog.hostname.here") {
     $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
- }
- else{
-    Write-Output "ERROR: Cannot resolve syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
-    exit 1
- }
-
-# flag used to track whether we're in follow mode or fill/backfill mode
-$FOLLOWINGLOG = $false
+    }
+else {
+    Write-Output "ERROR: Syslog hostname not configured.  Quitting.  Please review NPS-Syslog-Config.xml"
+    exit 3
+    }
 
 # load the timestamp for the last loaded log entry so we can be sure we don't double-load events
 if (Test-Path -Path .\lasttime.txt -PathType Leaf){$lasttime = Get-Content .\lasttime.txt -Raw}
@@ -73,6 +74,28 @@ function fill($backfill)
     else { # we have a file to process.
         Write-Output "...Processing $file..."
 
+        $fileHandle = [System.IO.File]::Open($file,[System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite) # get the file handle
+        $fileBytes = New-Object byte[] $fileHandle.Length
+        $FileContent = New-Object System.Text.UTF8Encoding $true
+        while ($fileHandle.Read($fileBytes, 0 , $fileBytes.Length)) {
+            $fileRead = $FileContent.GetString($fileBytes)
+            }
+
+        $fileHandle.Close()
+        $fileHandle.Dispose()
+
+        $fileRead = $fileRead -split "`r`n"
+
+        forEach ($d in $FileRead) # read each line of the log file
+        {
+            parseLog $d # call the parser to push any valid logs to Syslog
+        }
+    }
+
+<#
+    else { # we have a file to process.
+        Write-Output "...Processing $file..."
+
         $fileHandle = [System.IO.File]::OpenText($file) # get the file handle
 
         while ($d = $fileHandle.ReadLine()) # read each line of the log file (used to have :nextLine label)
@@ -83,6 +106,8 @@ function fill($backfill)
         $fileHandle.Close()
         $fileHandle.Dispose()
     }
+#>
+
 }
 
 # this function is called only once we're caught up and now need to operate in tail mode.
@@ -102,7 +127,7 @@ function follow()
         }
         else { # if the day changed, we need to open a new log file.  Reload the script and quit execution.
             powershell.exe -File ".\ParseNPSLogs.ps1"
-	    exit 0
+	        exit 0
         }
     }
     $FOLLOWINGLOG = $true # indicate that we're now in log follow mode
@@ -111,7 +136,7 @@ function follow()
 }
 
 # this function receives either pipeline input (from the follow() function), or a string (from the fill($backfill) function) passed as a parameter
-# the CSV string is parsed and reformatted according to InfluxDB, then the sendToDB($data,$time) function is called with the final payload
+# the CSV string is parsed and reformatted according to RFC3164 and the SendTo-Syslog function is called with the final payload
 function parseLog($f)
 {
     if(!$f){ # if our input was received from the pipeline, assign the value to $f
@@ -132,7 +157,7 @@ function parseLog($f)
     	$currentDayofMonth = Get-Date -Format "dd"
      	if($currentDayofMonth -gt $logDayofMonth[1]){ # if the day changed, we need to open a new log file.  Reload the script and quit execution.
       	    powershell.exe -File ".\ParseNPSLogs.ps1"
-	    exit 0
+	        exit 0
       	}
     }
     if ($timestamp -le $lasttime){return} # if we've already processed a log with this date/time, return.
@@ -167,6 +192,7 @@ function parseLog($f)
 
     $ap_ip = $g[15].Replace('"', '')
     $ap_radname_full = $g[16].ToLower().Replace('"', '')
+    $specific_switch = $g[11].ToLower().Replace('"', '')
     $policy = $g[60].Replace('"', '')
     $auth = TranslateAuth($g[23].Replace('"', ''))
     $policy2 = $g[24]
@@ -210,7 +236,7 @@ function parseLog($f)
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: AUTH-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
             SendTo-Syslog "auth" "informational" $details
             }
 
@@ -221,7 +247,7 @@ function parseLog($f)
             $OU = if ($OU) { $OU } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-ACCEPT | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | AuthMethod: " + $authmethod + " | Client: " + $origin_client + " | OU: " + $OU
+            $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: AUTH-ACCEPT | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | AuthMethod: " + $authmethod + " | Client: " + $origin_client + " | OU: " + $OU
             SendTo-Syslog "auth" "notice" $details
             }
 
@@ -232,22 +258,22 @@ function parseLog($f)
             $reason = if ($reason) { $reason } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             $rs = if ($rs) { $rs } else { '0' }
-            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-REJECTED | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Reason: " + $reason + " | Client: " + $origin_client + " | Extended: " + $rs
+            $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: AUTH-REJECTED | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Reason: " + $reason + " | Client: " + $origin_client + " | Extended: " + $rs
             SendTo-Syslog "auth" "error" $details
           }
 
         4 { #Accounting-Request - In sample logs we observed a large number of events of no value, so we filter out anything lacking details about a client (name, or user, or MAC)
                 # auth, informational
             #making sure all tag values are set and if not, set them to "0"
-            $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
+            $ap_radname_full = if ($specific_switch) { $specific_switch } else { $ap_radname_full }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
             if ($client_mac) {
-                $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+                $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
                 SendTo-Syslog "auth" "informational" $details
             } 
             else {
                 if ($client) {
-                $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $client
+                $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: ACCOUNTING-REQUEST | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $client
                 SendTo-Syslog "auth" "informational" $details
                 }
             }
@@ -259,7 +285,7 @@ function parseLog($f)
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
+            $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: ACCOUNTING-RESPONSE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac
             SendTo-Syslog "auth" "informational" $details
             }
 
@@ -270,7 +296,7 @@ function parseLog($f)
             $client_mac = if ($client_mac) { $client_mac } else { '0' }
             $ap_radname_full = if ($ap_radname_full) { $ap_radname_full } else { '0' }
             $origin_client = if ($origin_client) { $origin_client } else { '0' }
-            $details = $syslogDTS + " " + $NPSHostname + " NPS-RADIUS: AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
+            $details = $syslogDTS + " " + $NPSHostname + " NPS_RADIUS: AUTH-CHALLENGE | Device: " + $ap_radname_full + " | DeviceIP: " + $ap_ip + " | Client: " + $origin_client + " | MAC: " + $client_mac + " | Policy: " + $policy2
             SendTo-Syslog "auth" "informational" $details
             }
         #default {}
@@ -328,16 +354,17 @@ function SendTo-SysLog
     $pri = "<" + $privalue + ">"
     
     $msg = $pri + $Content
-    
+
     # Convert message to array of ASCII bytes.
     $bytearray = $([System.Text.Encoding]::ASCII).getbytes($msg)
     
     # RFC3164 Section 4.1: "The total length of the packet MUST be 1024 bytes or less."
     # "Packet" is not "PRI + HEADER + MSG", and IP header = 20, UDP header = 8, hence:
     if ($bytearray.count -gt 996) { $bytearray = $bytearray[0..995] }
-    
+
     # Send the Syslog message...
     $UdpClient.Send($bytearray, $bytearray.length) | out-null
+
 } # End SendTo-SysLog
 
 # This function is likely unnecessary for Syslog.  Keeping just in case we need to do some string sanitizing.
