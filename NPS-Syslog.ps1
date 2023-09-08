@@ -1,7 +1,6 @@
 # Many thanks to https://github.com/geek-at for the basis used to develop the NPS log parser.
 
 <#
-
 BACKFILL: If $true, Load any files found within the specified NPS log path.
      If backfill has previously run (as indicated by the presence of a .\backfilled.txt file,
      backfill beginning on the day following the previous run.
@@ -19,7 +18,7 @@ Catch {
     }
     
 $ConfigFile = '.\NPS-Syslog-Config.xml'
-$ConfigParams = [xml](get-content $ConfigFile) # load the configuraton file
+$ConfigParams = [xml](get-content $ConfigFile) # load the configuration file
 
 # load the configuration values into script variables
 $PATH = $ConfigParams.configuration.log.path.value
@@ -27,11 +26,15 @@ $SyslogTarget = $ConfigParams.configuration.server.fqdn.value
 $SyslogPort = $ConfigParams.configuration.server.port.value
 $IGNOREUSER = $ConfigParams.configuration.option.ignoreuser.value
 
-# This computer's NETBIOS name, used for Syslog
+# This computer's NETBIOS name, used to tag Syslog messages
 $NPSHostname = $env:COMPUTERNAME
 
-if ($SyslogTarget -eq "syslog.hostname.here") {
-    Write-Output "ERROR: Invalid syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
+# initialize the UDP socket writer
+if ($SyslogTarget -ne "syslog.hostname.here") {
+    $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
+ }
+ else{
+    Write-Output "ERROR: Cannot resolve syslog hostname.  Quitting.  Please review NPS-Syslog-Config.xml"
     exit 1
  }
 
@@ -53,7 +56,7 @@ function saveLastTime($time)
 # In standard mode, it will be called once only to catch up today's log file.
 function fill($backfill)
 {
-    if(!$backfill) # if we're not in backfill mode, skip this
+    if(!$backfill) # if we're not in backfill mode, look for today's log file
     {
 	$datestring = (Get-Date).ToString("yyMMdd")
         $file = $PATH + '\IN' + $datestring + '.log'
@@ -63,22 +66,23 @@ function fill($backfill)
         $file = $backfill
     }
 
-    # if we don't find the log file, bail out.
+    # if we don't find the log file, do nothing.
     if (-not(Test-Path -Path $file -PathType Leaf)) {
-        Write-Output "No log file $file found to process."
-        return -1
+        Write-Output "No log file $file found to backfill."
     }
-    Write-Output "...Processing $file..."
+    else { # we have a file to process.
+        Write-Output "...Processing $file..."
 
-    $fileHandle = [System.IO.File]::OpenText($file) # get the file handle
+        $fileHandle = [System.IO.File]::OpenText($file) # get the file handle
 
-    :nextLine while ($d = $fileHandle.ReadLine()) # read each line of the log file
-    {
-        parseLog $d # call the parser to push any valid logs to InfluxDB
+        while ($d = $fileHandle.ReadLine()) # read each line of the log file (used to have :nextLine label)
+        {
+            parseLog $d # call the parser to push any valid logs to InfluxDB
+        }
+        # finished reading file.  Close handle.
+        $fileHandle.Close()
+        $fileHandle.Dispose()
     }
-    # finished reading file.  Close handle.
-    $fileHandle.Close()
-    $fileHandle.Dispose()
 }
 
 # this function is called only once we're caught up and now need to operate in tail mode.
@@ -88,10 +92,18 @@ function follow()
     $datestring = (Get-Date).ToString("yyMMdd")
     $file = $PATH + '\IN' + $datestring + '.log'
 
-    # if we don't find the log file, bail out.
-    if (-not(Test-Path -Path $file -PathType Leaf)) {
-        Write-Output "No log file $file found to process."
-        return -1
+    # if we don't find the log file, keep trying every few minutes, as NPS may not have written an event yet.
+    while (-not(Test-Path -Path $file -PathType Leaf)) {
+        $datestringnow = (Get-Date).ToString("yyMMdd")
+        if ($datestringnow -eq $datestring) {
+            Write-Output "No log file $file found to tail.  Waiting for an event to be written..."
+            Start-Sleep -Seconds 30
+            fill $false
+        }
+        else { # if the day changed, we need to open a new log file.  Reload the script and quit execution.
+            powershell.exe -File ".\ParseNPSLogs.ps1"
+	    exit 0
+        }
     }
     $FOLLOWINGLOG = $true # indicate that we're now in log follow mode
     Write-Output "...Tailing log file $file"
@@ -120,7 +132,7 @@ function parseLog($f)
     	$currentDayofMonth = Get-Date -Format "dd"
      	if($currentDayofMonth -gt $logDayofMonth[1]){ # if the day changed, we need to open a new log file.  Reload the script and quit execution.
       	    powershell.exe -File ".\ParseNPSLogs.ps1"
-	        exit 0
+	    exit 0
       	}
     }
     if ($timestamp -le $lasttime){return} # if we've already processed a log with this date/time, return.
@@ -139,18 +151,18 @@ function parseLog($f)
         $client = $client.Substring($startTrim,$endTrim)
     }
 
-    $client_mac = $g[8].Replace('"', '').Replace('-', ':').Trim()
+    $client_mac = $g[8].Replace('"', '').Replace(':', '-').Trim()
     if($client_mac.Contains('|'))
     {
         $client_mac = $client_mac.Substring(0,$client_mac.IndexOf('|'))  ## EAT THE DOUBLE MAC
     }
     if ($client_mac -and -not $client_mac.Contains(':') -and $client_mac.Length -eq 12)
     {
-        $client_mac = $client_mac.Insert(10,":")
-        $client_mac = $client_mac.Insert(8,":")
-        $client_mac = $client_mac.Insert(6,":")
-        $client_mac = $client_mac.Insert(4,":")
-        $client_mac = $client_mac.Insert(2,":")
+        $client_mac = $client_mac.Insert(10,"-")
+        $client_mac = $client_mac.Insert(8,"-")
+        $client_mac = $client_mac.Insert(6,"-")
+        $client_mac = $client_mac.Insert(4,"-")
+        $client_mac = $client_mac.Insert(2,"-")
     }
 
     $ap_ip = $g[15].Replace('"', '')
@@ -313,7 +325,7 @@ function SendTo-SysLog
         default {$Severity = 5 } #Default is Notice
         }
     $privalue = [int]$Facility + [int]$Severity
-    $pri = "<" + $privalue + "> "
+    $pri = "<" + $privalue + ">"
     
     $msg = $pri + $Content
     
@@ -325,7 +337,6 @@ function SendTo-SysLog
     if ($bytearray.count -gt 996) { $bytearray = $bytearray[0..995] }
     
     # Send the Syslog message...
-    $UdpClient = New-Object System.Net.Sockets.UdpClient $SyslogTarget, $SyslogPort
     $UdpClient.Send($bytearray, $bytearray.length) | out-null
 } # End SendTo-SysLog
 
