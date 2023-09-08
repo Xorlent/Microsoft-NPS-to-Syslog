@@ -8,7 +8,7 @@
   <server>
     <!-- Update/edit the values below according to your syslog server settings.  No support for authentication at this time. -->
     <fqdn key="fqdn" value="syslog.hostname.here"/>
-    <dbport key="port" value="514"/>
+    <port key="port" value="514"/>
   </server>
   <option>
     <!-- ignoreuser: Skip logs with the specified username.  Some admins want to see RADIUS test user logs while others do not.
