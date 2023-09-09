@@ -43,7 +43,8 @@ This file contains lookup functions for various log status fields, converting fr
 1. Open Computer Management and reset the password for the user.  Always use a complex password with a minimum length of 15 characters.  
 2. Once the password has been changed, open Task Scheduler and edit the task, specifying this new password when saving the task.  
 ### I need to backfill data again because my Syslog server was offline/unreachable during the first run
-1. Delete the backfilled.txt file  
+1. Delete the backfilled.txt file
+2. Run ```NPS-Syslog.ps1 $true```  
 ### The script was not running for a few days so I have a gap in logs sent to Syslog
 1. Edit backfilled.txt and set the date (in YYMMDD format) to the file prior to where you would like to resume the backfill process.  
 2. Run ```NPS-Syslog.ps1 $true```  
