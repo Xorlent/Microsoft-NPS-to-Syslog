@@ -126,7 +126,7 @@ function follow()
             fill $false
         }
         else { # if the day changed, we need to open a new log file.  Reload the script and quit execution.
-            powershell.exe -File ".\ParseNPSLogs.ps1"
+            powershell.exe -File ".\NPS-Syslog.ps1"
 	        exit 0
         }
     }
@@ -156,7 +156,7 @@ function parseLog($f)
     	$logDayofMonth = $date.Split('/')
     	$currentDayofMonth = Get-Date -Format "dd"
      	if($currentDayofMonth -gt $logDayofMonth[1]){ # if the day changed, we need to open a new log file.  Reload the script and quit execution.
-      	    powershell.exe -File ".\ParseNPSLogs.ps1"
+      	    powershell.exe -File ".\NPS-Syslog.ps1"
 	        exit 0
       	}
     }
